@@ -1,0 +1,447 @@
+---
+title: "R Notebook"
+output:
+  word_document: default
+  html_notebook: default
+  pdf_document: default
+---
+Product Sentiment Analysis
+
+
+# load libraries that you feel you need and explain why
+```{r codechunk-libraryload, echo=FALSE, message=FALSE, warning=FALSE}
+if (!("knitr" %in% installed.packages())) install.packages("knitr")
+library(knitr)
+```
+
+```{r}
+library(dplyr)
+library(lubridate)
+library(tidyverse)
+library(tm)
+library(wordcloud)
+library(RColorBrewer)
+library(tidytext)
+library(ggplot2)
+library(igraph)
+library(ggraph)
+```
+
+# Load the data from a file
+```{r code1, echo=FALSE, message=FALSE, warning=FALSE}
+options(stringsAsFactors = FALSE)
+
+posts <- readRDS("C:/Users/Public/pranitha/productsalescomments.RDS")
+```
+
+# Assess the data
+```{r}
+head(posts)
+summary(posts)
+colSums(is.na(posts))
+duplicate_rows <- sum(duplicated(posts))
+print(paste("Number of duplicate rows:", duplicate_rows))
+
+```
+
+# Insights Gained:
+
+1. There are 18 columns and 27669 row in the datset
+
+2. There are 11 integer columns and 7 non integer columns. Among the non integer column T_Price, T_Cost columns should be numeric
+
+3. There are 12040 null values in CustomerID, 14100 null values in star_Rating columns
+
+4. There are blank spaces in Comment column so replacing them with Not Available
+
+5. There are no duplicates
+
+
+# Changes:
+
+1. Remove $ symbol in T_Price and T_Cost then convert to numeric for calculations
+
+2. Replacing CustomerID NA values with "Not Available". There are 14100 Null Values in Star_Rating so deleting them affects the analysis results so I decided to replace with their mean
+
+3. There are Empty balcks which means they havent rated so no review so Im replacing empty black with "No Review Given"
+
+4. Creating new column called Profits where Profits = T_Price - T_Cost
+
+
+# 1. Remove $ symbol in T_Price and T_Cost then convert to numeric
+
+```{r}
+posts$T_Price <- as.numeric(gsub("\\$", "", posts$T_Price))
+posts$T_Cost  <- as.numeric(gsub("\\$", "", posts$T_Cost))
+```
+
+
+# 2. Replacing CustomerID NA values with "Not Available" and  Null Values in Star_Rating by mean
+
+```{r}
+posts$CustomerID[is.na(posts$CustomerID)] <- "Not Available"
+Mean_Star_Rating <- mean(posts$Star_Rating, na.rm = TRUE)
+posts$Star_Rating[is.na(posts$Star_Rating)] <- Mean_Star_Rating
+```
+
+
+# 3. There are Empty balcks which means they havent rated so no review so Im replacing empty black with "No Review Given"
+
+```{r}
+posts$Comment[posts$Comment == ""] <- "No Review Given"
+```
+
+
+# 4 Creating new column called Profits
+
+```{r}
+posts$Profit <- posts$T_Price - posts$T_Cost
+```
+
+# Check Data
+
+```{r}
+head(posts)
+summary(posts)
+colSums(is.na(posts))
+duplicate_rows <- sum(duplicated(posts))
+print(paste("Number of duplicate rows:", duplicate_rows))
+```
+
+# Insights Gained:
+
+There are no null values and Duplicates and all the mentioned issues in data are cleared so we have succesfully cleaned the data now proceedingwith analysis
+
+```{r}
+View(posts)
+```
+
+
+# Visualizations
+
+# 1. Total Revenue from Each Year
+
+```{r}
+yr_rev <- posts %>% group_by(Year) %>% summarise(total_revenue = sum(T_Price)) 
+
+ggplot(yr_rev, aes(x = Year, y = total_revenue)) + geom_line(color = "violet") +
+  geom_point() + labs(title = "Total Revenue By Year", x = "Year", y = "Revenue")
+
+```
+
+Insights Gained:
+2020 is the year with more Revenue then other years. From 2018 to 2020 there is good increase in revenues but after 2020 there is downfall in revenue
+
+
+# 2. Total Profits by Year
+
+```{r}
+yr_profit <- posts %>%  group_by(Year) %>% summarise(total_profit = sum(Profit))
+print(yr_profit)
+
+ggplot(yr_profit, aes(x = Year, y = total_profit)) +  geom_line(color = "darkred") + 
+  geom_point() + labs(title = "Total Profit By Year", x = "Year", y = "Profit")
+```
+
+Insights Gained:
+There is positive increase in profit till 2020 then profit has slightly decreased
+
+# 3. Parlors by Total Revenue
+
+```{r}
+t_parlors <- posts %>% group_by(ParlorLocation) %>%
+  summarise(total_revenue = sum(T_Price, na.rm = TRUE)) %>% arrange(desc(total_revenue))
+
+ggplot(t_parlors, aes(x = reorder(ParlorLocation, total_revenue), y = total_revenue)) +
+  geom_bar(stat = "identity", fill = "pink") + coord_flip() +
+  labs(title = "Parlors by Total Revenue", x = "Parlor", y = "Total Revenue")
+```
+
+Insights Gained:
+Traverse City has highest revenue and Port Huron Has lowest revenue
+
+
+# 4. Parlors by Total Profit 
+
+```{r}
+tp_parlors <- posts %>%  group_by(ParlorLocation) %>%
+  summarise(total_profit = sum(Profit, na.rm = TRUE)) %>% arrange(desc(total_profit))
+
+print(tp_parlors)
+
+ggplot(tp_parlors, aes(x = reorder(ParlorLocation, total_profit), y = total_profit)) +
+  geom_bar(stat = "identity", fill = "lightblue") + 
+  coord_flip() + labs(title = "Parlors by Total Profit", x = "Parlor", y = "Total Profit")
+```
+
+Insights Gained:
+Traverse city has the highest Profit and Port Huron has the lowest profis
+
+# 5. Highest Number of Transactions in Year-Weaak
+
+```{r}
+trans_cnt <- posts %>% group_by(Year, Week) %>% summarise(trans_cnt = n(), .groups = "drop") 
+trans_cnt_order <- trans_cnt %>% arrange(Year, Week) %>% mutate(TimeKey = paste(Year, Week, sep = "-"))
+trans_cnt_order$TimeKey <- factor(trans_cnt_order$TimeKey,  levels = trans_cnt_order$TimeKey)
+print(trans_cnt_order)
+
+ggplot(trans_cnt_order, aes(x = TimeKey, y = trans_cnt)) +
+  geom_bar(stat = "identity", fill = "darkred") +
+  labs(title = "Transaction Count by Year-Week", x = "Year-Week", y = "Total Transactions") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Insights Gained:
+in 2015, week 5 has more transactions and in 2018, week 2 has least number of transactions
+
+
+# 6. Total Revenue by FeatureFlavor
+
+```{r}
+rev_flavor <- posts %>% group_by(FeatureFlavor) %>% 
+  summarise(total_revenue = sum(T_Price), .groups = "drop") %>% arrange(desc(total_revenue))
+print(rev_flavor)
+
+ggplot(rev_flavor, aes(x = reorder(FeatureFlavor, total_revenue), y = total_revenue, fill = FeatureFlavor)) +
+  geom_bar(stat = "identity") + labs( title = "Total Revenue by FeatureFlavor", x = "Feature Flavor", y = "Total Revenue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Insights Gained:
+Paw Claw Ice Cream has the highest revenue and Cherry Delight	has the lowest revenue
+
+# 7. Total Profits by FeatureFlavor
+
+```{r}
+profit_flavor <- posts %>%  group_by(FeatureFlavor) %>% summarise(total_profit = sum(Profit), .groups = "drop") %>%
+  arrange(desc(total_profit))
+
+print(profit_flavor)
+
+ggplot(profit_flavor, aes(x = reorder(FeatureFlavor, total_profit), y = total_profit, fill = FeatureFlavor)) +
+  geom_bar(stat = "identity") +  labs(title = "Total Profit by Feature Flavor", x = "Feature Flavor", y = "Total Profit") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Insights Gained:
+Paw Claw Ice Cream has the highest Profits where Cherry Delight	has the lowest profits
+
+
+# 8. Total Year-Weekly Revenue
+
+```{r}
+week_rev <- posts %>% group_by(Year, Week) %>% summarise(week_rev = sum(T_Price), .groups = "drop")
+week_rev_ord <- week_rev %>% arrange(Year, Week) %>% mutate(TimeKey = paste(Year, Week, sep = "-"))
+week_rev_ord$TimeKey <- factor(week_rev_ord$TimeKey, levels = week_rev_ord$TimeKey)
+print(week_rev_ord)
+
+ggplot(week_rev_ord, aes(x = TimeKey, y = week_rev)) + geom_bar(stat = "identity", fill = "darkgreen") +
+  labs(title = "Weekly Revenue Trend", x = "Year-Week", y = "Revenue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+Insights Gained:
+In 2021, week 5 has the highest revenue and in 2018, week 3 has the lowest revenue
+
+# 9. Average Star_Rating by ParlorLocation
+
+```{r}
+avg_rate_loc <- posts %>% group_by(ParlorLocation) %>% 
+  summarise(avg_rate = mean(Star_Rating, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(avg_rate))
+print(avg_rate_loc)
+
+ggplot(avg_rate_loc, aes(x = reorder(ParlorLocation, avg_rate), y = avg_rate, fill = ParlorLocation)) +
+  geom_bar(stat = "identity") + geom_text(aes(label = round(avg_rate, 2)), vjust = -0.2) + 
+  labs( title = "Average Star Rating by Parler Location", x = "Parler Location", y = "Average Star Rating") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Insights Gained:
+Almost all Parlor locations has 4+ average reviews
+Traverse City has the highest average Star Rating which is 4.698 out of 5
+
+
+
+# 10. Top 10 Customers by Transaction Count and Their Preffered Flavor
+
+```{r}
+top10_cust <- posts %>% group_by(CustomerID) %>% summarise(Transaction_Count = n(), .groups = "drop") %>%
+  arrange(desc(Transaction_Count)) %>% head(10)
+
+print(top10_cust)
+
+posts %>% filter(CustomerID %in% top10_cust$CustomerID) %>% group_by(CustomerID) %>%
+  summarise(
+    Total_Chocolate = sum(Chocolate, na.rm = TRUE),
+    Total_Feature = sum(Feature, na.rm = TRUE),
+    total_Superman = sum(Superman, na.rm = TRUE),
+    total_Vanilla = sum(Vanilla, na.rm = TRUE),.groups = "drop") -> top10_customer_sum
+
+print(top10_customer_sum)
+```
+
+Insights Gained:
+Customer with customerID 101, 180, 251,99 has the highest transactions which is 38 and all of them most preferred Flavor was Feature and second most preferred flavor was Vanilla
+
+# Now Prforming analysis on Comments
+
+Before that Im removing rows in Comments where value is No Review Given
+
+```{r}
+posts <- posts %>%  filter(Comment != "No Review Given")
+head(posts)
+
+```
+
+
+
+# Extracting words from comments
+
+```{r}
+# Unnest words from Comment
+posts_words <- posts %>% unnest_tokens(word, Comment)
+
+# Removing stopwords
+posts_words <- posts_words %>% anti_join(stop_words)
+```
+
+
+```{r}
+posts_words %>% inner_join(get_sentiments("bing")) %>% head(5)
+```
+
+```{r}
+posts_words %>% inner_join(get_sentiments("afinn")) %>% head(5)
+```
+```{r}
+posts_words %>% inner_join(get_sentiments("nrc")) %>% head(10)
+```
+
+
+# Now answer/create the following:
+
+# Question 1. Top 15 meaningful words
+
+```{r}
+top15_words <- posts_words %>% count(word, sort = TRUE) %>% top_n(15)
+print(top15_words)
+
+top15_words %>% mutate(word = reorder(word, n)) %>%
+  ggplot(aes(x = word, y = n)) +
+  geom_col(fill = "lightgreen") +
+  coord_flip() +
+  labs(title = "Top 15 Meaningful Words", x = "Word", y = "Count")
+```
+Answer: ice is the most frequently used words followed by cream, flavor
+
+
+
+# 2. Question Word cloud
+
+```{r}
+set.seed(1234)
+wordcloud(words = posts_words$word, 
+          min.freq = 2,
+          max.words = 100, 
+          random.order = FALSE, 
+          rot.per = 0.35,
+          colors = brewer.pal(8, "Dark2"))
+```
+
+Answer:
+we can observe the word colud where it shows ice, cream are most used words followed by flavor, 'm, cherry, life and other words
+
+
+# Question 3. Who are the top 5 customers by CustomerID who posts the most comments on products?  For each these 5 are these positive or negative customers overall considering a measure using the afinn sentiment measure?
+
+```{r}
+top5_cust <- posts %>% group_by(CustomerID) %>%
+  summarise(Comment_Count = n()) %>% arrange(desc(Comment_Count)) %>% head(5)
+print(top5_cust)
+
+Sentiment_type <- posts %>% unnest_tokens(word, Comment) %>% inner_join(get_sentiments("afinn")) %>% group_by(CustomerID) %>%
+  summarise(Afinn_Sentiment_Score = sum(value))
+
+top5_sentiment <- top5_cust %>% left_join(Sentiment_type, by = "CustomerID")
+print(top5_sentiment)
+```
+
+Answer:
+Customer with customerID 180,251,99,301, 474  the top 5 customers who posted more number comments, and they have positive Afinn Sentiment score
+
+
+# Question 4. What Parlor site has the most comments?  Are these negative or positive?
+
+```{r}
+parlor_cmt <- posts %>% group_by(ParlorLocation) %>% summarise(comment_count = n()) %>% arrange(desc(comment_count))
+print(parlor_cmt)
+
+top_parlor <- parlor_cmt$ParlorLocation[1]
+sen_cnt <- posts %>% filter(ParlorLocation == top_parlor) %>% unnest_tokens(word, Comment) %>%
+  inner_join(get_sentiments("bing")) %>% count(sentiment)
+
+sen_cnt <- sen_cnt %>% mutate(percentage = round(n / sum(n) * 100, 1), label = paste0(sentiment, "\n", n, " (", percentage, "%)"))
+ggplot(sen_cnt, aes(x = "", y = n, fill = sentiment)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) +
+  labs(title = paste("Sentiment in", top_parlor, "Parlor")) +
+  theme_void() +
+  theme(legend.position = "none")
+```
+
+Answer: Traverse City has the highest comments and among those comments 1288 are negative and 3814 are positive comments
+
+
+
+# Question  5. What production site has the most comments?  Are these negative or positive?
+
+```{r}
+prod_cmt <- posts %>% group_by(ProductionLocation) %>% 
+  summarise(comment_count = n()) %>%  arrange(desc(comment_count))
+print(prod_cmt)
+
+top_prod <- prod_cmt$ProductionLocation[1]
+
+posts %>%  filter(ProductionLocation == top_prod) %>%  unnest_tokens(word, Comment) %>%
+  inner_join(get_sentiments("bing")) %>%  count(sentiment) %>%
+  ggplot(aes(x = sentiment, y = n, fill = sentiment)) +  geom_col() + 
+  geom_text(aes(label = n), vjust = -0.2) + 
+  labs(title = paste("Sentiment in", top_prod, "Production Location"), x = "Sentiment",  y = "Count")
+```
+Answer: Mount Pleasant has the highest Comments and  it has 1871 negative and 5612 positive comments
+
+
+
+# Question  6. What are the top 10 most frequent comments made by customers and how many times did each comment get made?
+
+```{r}
+top10_cmts <- posts %>% group_by(Comment) %>% summarise(Frequency = n()) %>%
+  arrange(desc(Frequency)) %>% head(10)
+
+print(top10_cmts)
+```
+
+Answer:
+We can observe top 10 most frequent comments made by customers and we can see their count. Most Frequent comment - Hello ice cream heaven - where have you been all my life which occurred 263 times
+And all those comments are positive comments
+
+
+# Question 7. Create a network diagram based on bigrams
+
+```{r}
+posts_bigrams <- posts %>% unnest_tokens(bigram, Comment, token = "ngrams", n = 2)
+bigrams_sep <- posts_bigrams %>% separate(bigram, c("word1", "word2"), sep = " ")
+bigrams_fil <- bigrams_sep %>% filter(!word1 %in% stop_words$word, !word2 %in% stop_words$word)
+bigram_counts <- bigrams_fil %>% count(word1, word2, sort = TRUE)
+bigram_graph <- bigram_counts %>% filter(n > 1) %>% graph_from_data_frame()
+
+set.seed(123)
+ggraph(bigram_graph, layout = "fr") + geom_edge_link(aes(edge_alpha = n), show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = 5) + geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void() + labs(title = "Bigram Network Diagram")
+```
+
+
+GRADS----
+assuming you work for the company/organization for which these product comments have been collected, what can you infer from the data? If the company was asking you if they should take any actions based on customer feedback, what would you tell them and why?
